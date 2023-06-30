@@ -9,7 +9,7 @@ output:
     theme: united
   csl: apa.csl
 ---
-Paquetes a utilizar
+Packages used
 ```{r message=FALSE, warning=FALSE}
 library(Biobase)
 library(RColorBrewer)
