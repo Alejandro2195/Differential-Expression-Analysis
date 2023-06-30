@@ -1,0 +1,213 @@
+---
+title: "Differential Expression analysis"
+email: alejandrorex95@gmail.com
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    code_download: TRUE
+    theme: united
+  csl: apa.csl
+---
+Paquetes a utilizar
+```{r message=FALSE, warning=FALSE}
+library(Biobase)
+library(RColorBrewer)
+library(pheatmap)
+library(tidyverse)
+library(edgeR)
+library(DESeq2)
+library(ashr)
+library(RColorBrewer)
+library(limma)
+library(leukemiasEset)
+```
+
+In this lab we will perform a differential expression analysis starting from scratch.
+
+## Case study:
+
+Doxorubicin is a commonly prescribed cancer drug, but one of its side effects is cardiotoxicity. This drug damages heart cells by binding to the protein topoisomerase-II beta, or Top2b.
+
+A 2x2 factorial experiment will be performed:
+1.Two types of mice in this case:
+- genetically normal wild type (wt)
+- Top2b knockout mice (mice that have had Top2b removed from heart cells) (top2b)
+
+2.Two treatments:
+- PBS control solution (pbs)
+- Doxorubicin (dox)
+
+If doxorubicin requires Top2b to exert its cardiotoxic effect, Top2b knockout mice should not be affected by doxorubicin treatment. This is the hypothesis to be tested.
+The data contains measurements from 29,532 genes and 12 mice, with three replicates for each factor combination.
+
+```{r, warning=FALSE}
+# First we load the three types of data
+doxorrubicina_exprs<-as.matrix(read.csv("E:/02 Estudio/00 NOTAS IMPORTANTES/R - Notas/Datasets/doxorrubicina_exprs.csv",row.names=1))
+doxorrubicina_pData<-read.csv("E:/02 Estudio/00 NOTAS IMPORTANTES/R - Notas/Datasets/doxorrubicina_pData.csv",row.names=1)
+doxorrubicina_fData<-read.csv("E:/02 Estudio/00 NOTAS IMPORTANTES/R - Notas/Datasets/doxorrubicina_fData.csv", row.names = 1)   
+
+# Then we create the object ExpressionSet
+eset <- ExpressionSet(assayData = doxorrubicina_exprs,
+                      phenoData = AnnotatedDataFrame(doxorrubicina_pData),
+                      featureData = AnnotatedDataFrame(doxorrubicina_fData))
+
+
+```
+
+
+## Preprocessing
+
+```{r}
+# First we do the logarithmic transformation
+exprs(eset) <- log(exprs(eset))
+
+# We visualize the already transformed data (classified according to the genotype)
+plotDensities(eset,  group = pData(eset)[, "genotype"], legend = "topright")
+
+# We normalize the data by quantiles
+exprs(eset) <- normalizeBetweenArrays(exprs(eset))
+
+# We visualize again to compare the distribution after normalization
+plotDensities(eset,  group = pData(eset)[, "genotype"], legend = "topright")
+
+# Now we determine the genes that present an expression level greater than zero
+keep <- rowMeans(exprs(eset)) > 0
+sum(keep)
+
+# We filter the selected genes
+eset <- eset[keep]
+
+# We visualize genes with an expression level greater than zero
+plotDensities(eset, group = pData(eset)[,"genotype"], legend = "topright")
+```
+
+## Data Visualization
+
+```{r, warning=FALSE}
+# Next we look for the row that contains the expression data of Top2b in the data characteristics
+top2b <- which(fData(eset)[, "symbol"] == "Top2b")
+top2b
+
+# We plot the expression of top2b against the genotype in a boxplot.
+boxplot(exprs(eset)[top2b, ] ~ pData(eset)[, "genotype"],
+        main = fData(eset)[top2b, ])
+
+# Next, we use principal component analysis to check for sources of variation in the data and to check whether samples cluster by genotype (WT vs. Top2b null) and treatment (PBS vs. Dox).
+plotMDS(eset, labels = pData(eset)[, "genotype"], gene.selection = "common") # by genotype
+
+plotMDS(eset, labels = pData(eset)[, "treatment"], gene.selection = "common") # per treatment
+
+# Interestingly, Top2b null samples cluster more tightly compared to wild-type samples. Three groups are formed. wild-type mice are separated by treatment, whereas Top2b knockout mice form one large group.
+```
+
+## Differential Expression Analysis
+
+After carrying out the multidimensional scaling analyses, it is observed that three groups are formed. wild-type mice are separated by treatment, whereas Top2b knockout mice form one large group. This supports the hypothesis that Top2b knockout mice are resistant to the cardiotoxic effects of doxorubicin.
+To test this formally a differential expression analysis will be performed.
+
+To test the mechanism of doxorubicin-induced cardiotoxicity, three contrasts will be tested:
+1. Response of wild-type (wt) mice to doxorubicin (dox) treatment
+2. Response of top2b knockout mice (top2b) to doxorubicin (dox) treatment
+3. Differences between top2b and wt mice in response to doxorubicin (dox) treatment
+
+```{r, warning=FALSE}
+# First the design matrix without intercepts is constructed
+group <- with(pData(eset), paste(genotype, treatment, sep = ".")) # A simple variable is created by combining genotype and treatment
+group <- factor(group)
+design <- model.matrix(~0 + group)
+colnames(design) <- levels(group)
+
+colSums(design)
+ 
+# Then the contrast matrix is built and the three aforementioned contrasts are tested.
+cm <- makeContrasts(dox_wt = wt.dox - wt.pbs,
+                    dox_top2b = top2b.dox - top2b.pbs,
+                    interaction = (top2b.dox - top2b.pbs) - (wt.dox - wt.pbs),
+                    levels = design)
+
+# Finally the contrasts will be tested
+cm
+
+# Fits the model
+fit <- lmFit(eset, design)
+
+# Contrasts are adjusted
+fit2 <- contrasts.fit(fit, contrasts = cm)
+
+# The t statistic is calculated for the contrasts
+fit2 <- eBayes(fit2)
+
+# Results are summarized
+results <- decideTests(fit2)
+summary(results)
+
+# A Venn diagram is created to visualize the results.
+vennDiagram(results)
+```
+
+## Results inspection
+
+The results will be inspected later.
+Since several contrasts (comparisons between groups) have been carried out, it must be specified in each case which one is referred to by means of the "coef" argument (for example: coef="dox_wt)
+
+```{r, warning=FALSE}
+# It will be corroborated that it was modeled correctly by plotting the histogram of p values for each contrast performed.
+stats_dox_wt <- topTable(fit2, coef = "dox_wt", number = nrow(fit2),
+                         sort.by = "none") # For comparison of treatments in wt mice
+
+stats_dox_top2b <- topTable(fit2, coef = "dox_top2b", number = nrow(fit2),
+                            sort.by = "none") # For comparison of treatments in top2b mice
+
+stats_interaction <- topTable(fit2, coef = "interaction", number = nrow(fit2),
+                              sort.by = "none") # For comparison between wt and top2b mice
+
+# Histograms are created for each case
+hist(stats_dox_wt[, "P.Value"])
+hist(stats_dox_top2b[,"P.Value"])
+hist(stats_interaction[,"P.Value"])
+
+```
+
+## Volcano plot
+
+The volcano plot is one of the most popular plots and probably the most informative, as it summarizes both the rate of expression (logFC) and the statistical significance (p-value). It is a scatterplot of the log10-transformed negative p-values of the gene-specific test (on the y-axis) versus rate of expression (on the x-axis). The plot shows data points with low (highly significant) p-values appearing toward the top of the plot. The logFC values are used to determine the direction of change (up and down) that appears equidistant from the center. Features declared as differentially expressed are highlighted in red.
+
+Fold change is a measurement that describes how much a quantity changes between an original measurement and a subsequent one. It is defined as the ratio between the two quantities; for quantities A and B, the fold change of B with respect to A is B/A. In other words, a change from 30 to 60 is defined as a change of 2.
+
+The fold change is often used in microarray gene expression data analysis and RNA-Seq experiments to measure the change in the expression level of a gene. However, when the denominator is close to zero, the relationship is not stable and the fold change value can be disproportionately affected by measurement noise.
+
+The magnitude of the differential expression will be displayed with a volcano graph (the 5 genes with the highest differential expression) for each case.
+
+```{r}
+gene_symbols <- fit2$genes[, "symbol"] # First we extract the gene names to an independent variable
+
+volcanoplot(fit2, coef = "dox_wt", highlight = 5, names = gene_symbols) # For comparison of treatments in wt mice
+
+volcanoplot(fit2, coef = "dox_top2b", highlight = 5, names = gene_symbols) # For comparison of treatments in top2b mice
+
+volcanoplot(fit2, coef = "interaction", highlight = 5, names = gene_symbols) # For comparison between wt and top2b mice
+
+```
+
+## Gene Enrichment
+
+Finally, pathway-level changes in response to doxorucibin treatment will be tested using KEGG. This will identify KEGG pathways that are enriched for differentially expressed genes more than expected by chance. In this case, the 5 most enriched genes will be shown.
+
+```{r}
+entrez <- fit2$genes[, "entrez"] # We extract the IDs of the genes to an independent variable
+
+# Enrichment analysis for comparison of treatments in wt mice
+
+topKEGG(kegga(fit2, coef = "dox_wt", geneid = entrez, species = "Mm"), number = 5)  # Top5 most enriched genes
+
+# Enrichment analysis for comparison between wt and top2b mice
+
+topKEGG(kegga(fit2, coef = "interaction", geneid = entrez, species = "Mm"), number = 5) # Top5 most enriched genes
+
+```
+
+One of the most enriched genes corresponds to a pathway for cardiomyopathy, so genes for this pathway would be worth further investigation. This analysis helps to better understand the effect of differentially expressed genes in the doxorubicin study.
+
+
+
