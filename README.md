@@ -18,5 +18,5 @@ A 2x2 factorial experiment will be performed:
 If doxorubicin requires Top2b to exert its cardiotoxic effect, Top2b knockout mice should not be affected by doxorubicin treatment. This is the hypothesis to be tested.
 The data contains measurements from 29,532 genes and 12 mice, with three replicates for each factor combination.
 
-## View as html:
+## View as HTML:
 https://alejandro2195.github.io/Differential-Expression-Analysis-in-R/
